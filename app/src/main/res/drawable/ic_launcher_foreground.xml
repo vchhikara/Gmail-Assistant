@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- SAFE ZONE GROUP -->
+    <group
+        android:translateX="6"
+        android:translateY="6"
+        android:scaleX="0.89"
+        android:scaleY="0.89">
+
+        <!-- LEFT BLUE LEG -->
+        <path
+            android:fillColor="#4285F4"
+            android:pathData="M30,30
+                C30,27 32,25 35,25
+                L41,25
+                L41,74
+                L35,74
+                C32,74 30,72 30,69Z"/>
+
+        <!-- RIGHT GREEN LEG -->
+        <path
+            android:fillColor="#34A853"
+            android:pathData="M67,25
+                L73,25
+                C76,25 78,27 78,30
+                L78,69
+                C78,72 76,74 73,74
+                L67,74Z"/>
+
+        <!-- RED MAIN TOP -->
+        <path
+            android:fillColor="#EA4335"
+            android:pathData="M41,25
+                L54,38
+                L67,25
+                C69.5,22.5 73,22.5 75.5,25
+                L54,47
+                L32.5,25
+                C35,22.5 38.5,22.5 41,25Z"/>
+
+        <!-- INNER RED -->
+        <path
+            android:fillColor="#FF5A4F"
+            android:pathData="M41,25
+                L54,38
+                L54,47
+                L41,34Z"/>
+
+        <!-- YELLOW -->
+        <path
+            android:fillColor="#FBBC05"
+            android:pathData="M67,25
+                L73,25
+                C76,25 78,27 78,30
+                L78,35
+                L67,46Z"/>
+
+        <!-- MAGNIFIER SHADOW -->
+        <path
+            android:fillColor="#12000000"
+            android:pathData="M60,44
+                A12,12 0 1,1 59.9,44Z"/>
+
+        <!-- OUTER RIM -->
+        <path
+            android:fillColor="#DADCE0"
+            android:pathData="M58,42
+                A11,11 0 1,1 57.9,42Z"/>
+
+        <!-- INNER RIM -->
+        <path
+            android:fillColor="#9AA0A6"
+            android:pathData="M58,42
+                A9.5,9.5 0 1,1 57.9,42Z"/>
+
+        <!-- LENS -->
+        <path
+            android:fillColor="#CFF5FF"
+            android:pathData="M58,42
+                A8.2,8.2 0 1,1 57.9,42Z"/>
+
+        <!-- LENS SPLIT -->
+        <path
+            android:fillColor="#A7E8F5"
+            android:pathData="M58,34
+                L66,42
+                L58,50Z"/>
+
+        <!-- GLOSS -->
+        <path
+            android:fillColor="#50FFFFFF"
+            android:pathData="M53,37
+                C56,34 61,34 64,37
+                C61,35 57,35 53,37Z"/>
+
+        <!-- CONNECTOR -->
+        <path
+            android:strokeWidth="2.5"
+            android:strokeColor="#BDC1C6"
+            android:strokeLineCap="round"
+            android:pathData="M65,49 L68,52"/>
+
+        <!-- HANDLE -->
+        <path
+            android:strokeWidth="6"
+            android:strokeColor="#5F6368"
+            android:strokeLineCap="round"
+            android:pathData="M68,52 L76,60"/>
+
+        <!-- HANDLE HIGHLIGHT -->
+        <path
+            android:strokeWidth="1.5"
+            android:strokeColor="#AECBFA"
+            android:strokeLineCap="round"
+            android:pathData="M69.5,53.5 L75,59"/>
+
+        <!-- BIG SPARK -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M56,36
+                Q56,40 60,40
+                Q56,40 56,44
+                Q56,40 52,40
+                Q56,40 56,36Z"/>
+
+        <!-- SMALL SPARK -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M66,35
+                Q66,37 68,37
+                Q66,37 66,39
+                Q66,37 64,37
+                Q66,37 66,35Z"/>
+
+        <!-- TINY SPARK -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M69,40
+                Q69,41.2 70.2,41.2
+                Q69,41.2 69,42.4
+                Q69,41.2 67.8,41.2
+                Q69,41.2 69,40Z"/>
+
+    </group>
+
+</vector>

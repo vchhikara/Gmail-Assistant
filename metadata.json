@@ -1,0 +1,6 @@
+{
+  "name": "Gmail Assistant",
+  "description": "Gmail Assistant is a lightweight assistant that categorizes inbox metadata with Gemini, suggests 1-tap cleanups, and generates on-demand summaries and action plans.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

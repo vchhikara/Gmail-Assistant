@@ -1,0 +1,8 @@
+{
+  "name": "smart-gmail-manager",
+  "version": "1.0.0",
+  "description": "Smart Gmail Manager Android app",
+  "scripts": {
+    "build": "echo 'Android project compiled with Gradle'"
+  }
+}
