@@ -123,7 +123,7 @@ Before you begin, ensure you have the following installed and configured:
 #### 1. Clone the Repository
 Open your terminal and clone the project to your local machine:
 ```bash
-git clone https://github.com/yourusername/gmail-assistant.git
+git clone https://github.com/vchhikara/gmail-assistant.git
 cd gmail-assistant
 ```
 
