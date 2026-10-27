@@ -1,55 +1,102 @@
 package com.example.ui
 
-import androidx.compose.animation.*
-import androidx.compose.foundation.BorderStroke
+import android.app.Activity
+import android.util.Log
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.List
-import com.example.ui.icons.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.example.data.EmailEntity
-import com.example.ui.theme.*
-import androidx.compose.foundation.Image
-import androidx.compose.ui.res.painterResource
-import com.example.R
-import java.text.SimpleDateFormat
-import java.util.*
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import com.example.ui.icons.*
+import com.example.ui.theme.KitMotion
+import com.example.ui.theme.KitShapes
+import com.example.ui.theme.kit
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.Scope
 import com.google.android.gms.common.api.ApiException
-import android.app.Activity
-import androidx.compose.ui.platform.LocalContext
-import android.util.Log
+import com.google.android.gms.common.api.Scope
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+private val Buckets = listOf(
+    "Work" to "Work",
+    "Bill" to "Bills",
+    "Newsletter" to "News",
+    "Promotion" to "Promo",
+    "Social" to "Social",
+)
+
+private val MoveCategories = listOf("Work", "Bill", "Newsletter", "Promotion", "Social")
+
+private data class NavItem(val label: String, val icon: ImageVector, val tag: String)
+
+private val NavItems = listOf(
+    NavItem("Inbox", SlimInbox, "nav_inbox_tab"),
+    NavItem("Buckets", SlimBuckets, "nav_buckets_tab"),
+    NavItem("Cleanup", SlimCleanup, "nav_cleanup_tab"),
+    NavItem("Settings", SlimSettings, "nav_settings_tab"),
+)
+
 @Composable
 fun SmartGmailHome(
     viewModel: SmartGmailViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     val emails by viewModel.allEmails.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -63,891 +110,456 @@ fun SmartGmailHome(
     val userEmail by viewModel.userEmail.collectAsState()
     val themePreference by viewModel.themePreference.collectAsState()
 
-    val inboxListState = rememberLazyListState()
-    val isInboxScrolled by remember { derivedStateOf { inboxListState.firstVisibleItemScrollOffset > 0 || inboxListState.firstVisibleItemIndex > 0 } }
+    var moveTarget by remember { mutableStateOf<EmailEntity?>(null) }
+    var lastSynced by remember { mutableStateOf<Long?>(null) }
+    var wasLoading by remember { mutableStateOf(false) }
+    LaunchedEffect(isLoading) {
+        if (wasLoading && !isLoading) lastSynced = System.currentTimeMillis()
+        wasLoading = isLoading
+    }
 
-    var showCategoryMoveDialog by remember { mutableStateOf<EmailEntity?>(null) }
+    val syncFailed = syncResult?.let { it.startsWith("Failed") || it.startsWith("Auth") } == true
+    val synced = lastSynced
+    val syncLine = when {
+        isLoading -> "Syncing..."
+        syncFailed -> "Sync failed. Tap Sync to retry."
+        synced != null -> "Synced " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(synced))
+        else -> "Ready"
+    }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = BackgroundPurple,
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = BackgroundPurple
-                ),
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.mipmap.gmail_assistantlauncher_foreground),
-                            contentDescription = "Gmail Assistant Icon",
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(Color.Transparent)
+    Box(modifier.fillMaxSize().background(kit.bg)) {
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            Header(syncLine, isLoading) { viewModel.syncInbox() }
+
+            AnimatedContent(
+                targetState = currentTab,
+                transitionSpec = { fadeIn(KitMotion.slide()) togetherWith fadeOut(tween(150)) },
+                label = "hero",
+            ) { tab ->
+                when (tab) {
+                    0 -> {
+                        val bills = emails.count { it.category == "Bill" && !it.isRead }
+                        val senders = emails.count { it.isUnsubscribeSuggested }
+                        Hero(
+                            title = "${emails.size} emails sorted",
+                            body = "${plural(bills, "bill")} waiting. Cleanup found ${plural(senders, "sender")} you rarely open.",
+                            pill = if (isConnected) "Connected" else "Demo data",
                         )
-                        Text(
-                            text = "Gmail Assistant",
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 20.sp,
-                            letterSpacing = (-0.5).sp,
-                            color = OnBackgroundPurple
+                    }
+                    1 -> Hero("Buckets", "Sort mail by category and clear a whole bucket in one tap.")
+                    2 -> Hero("Cleanup", "Unsubscribe from senders you rarely open and archive the clutter.")
+                    else -> Spacer(Modifier.height(4.dp))
+                }
+            }
+
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clip(KitShapes.panel)
+                    .background(kit.panel),
+            ) {
+                AnimatedContent(
+                    targetState = currentTab,
+                    transitionSpec = { fadeIn(KitMotion.slide()) togetherWith fadeOut(tween(150)) },
+                    label = "panel",
+                ) { tab ->
+                    when (tab) {
+                        0 -> InboxView(
+                            emails = emails,
+                            onEmailClick = { viewModel.selectEmail(it) },
+                            onToggleRead = { viewModel.toggleReadStatus(it.id, it.isRead) },
+                            onArchive = { viewModel.archiveEmail(it.id) },
+                            onDelete = { viewModel.deleteEmail(it.id) },
+                            onMove = { moveTarget = it },
+                        )
+                        1 -> BucketsView(
+                            emails = emails,
+                            activeCategory = activeCategoryTab,
+                            onCategorySelect = { viewModel.setActiveCategoryTab(it) },
+                            onEmailClick = { viewModel.selectEmail(it) },
+                            onToggleRead = { viewModel.toggleReadStatus(it.id, it.isRead) },
+                            onArchive = { viewModel.archiveEmail(it.id) },
+                            onDelete = { viewModel.deleteEmail(it.id) },
+                            onMove = { moveTarget = it },
+                            onBulkAction = { category, ids, action -> viewModel.performBulkAction(category, ids, action) },
+                        )
+                        2 -> CleanupView(
+                            emails = emails,
+                            onArchive = { viewModel.archiveEmail(it.id) },
+                            onDelete = { viewModel.deleteEmail(it.id) },
+                            onBulkUnsubscribe = { ids -> viewModel.performBulkAction("Newsletter", ids, "delete") },
+                        )
+                        else -> SettingsView(
+                            isConnected = isConnected,
+                            userName = userName,
+                            userEmail = userEmail,
+                            themePreference = themePreference,
+                            onThemeChange = { viewModel.setThemePreference(it) },
+                            onConnect = { name, email -> viewModel.connectOAuth(name, email) },
+                            onDisconnect = { viewModel.disconnectOAuth() },
                         )
                     }
-                },
-                actions = {
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 12.dp)
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(LightSurfaceBg)
-                            .clickable {
-                                if (currentTab == 3) {
-                                    viewModel.setTab(0)
-                                } else {
-                                    viewModel.setTab(3)
-                                }
-                            }, // Toggle Vault / Settings view
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (isConnected) {
-                            Text(
-                                text = userName.take(1).uppercase(),
-                                fontWeight = FontWeight.Bold,
-                                color = BrandPrimary,
-                                fontSize = 14.sp
-                            )
-                        } else {
-                            Icon(
-                                imageVector = account_circle,
-                                contentDescription = "OAuth Identity Account",
-                                tint = MediumGrayText,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
                 }
-            )
-        },
-        bottomBar = {
-            NavigationBar(
-                containerColor = LightSurfaceBg,
-                tonalElevation = 0.dp,
-                modifier = Modifier.border(BorderStroke(1.dp, SurfaceBorder.copy(alpha = 0.5f)))
-            ) {
-                NavigationBarItem(
-                    selected = currentTab == 0,
-                    onClick = { viewModel.setTab(0) },
-                    icon = { Icon(imageVector = inbox, contentDescription = "Inbox Tab") },
-                    label = { Text("Inbox") },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = OnBackgroundPurple,
-                        selectedTextColor = OnBackgroundPurple,
-                        indicatorColor = ActivePillBg,
-                        unselectedIconColor = MediumGrayText,
-                        unselectedTextColor = MediumGrayText
-                    ),
-                    modifier = Modifier.testTag("nav_inbox_tab")
-                )
-                NavigationBarItem(
-                    selected = currentTab == 1,
-                    onClick = { viewModel.setTab(1) },
-                    icon = { Icon(imageVector = bucket_check, contentDescription = "Buckets Tab") },
-                    label = { Text("Buckets") },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = OnBackgroundPurple,
-                        selectedTextColor = OnBackgroundPurple,
-                        indicatorColor = ActivePillBg,
-                        unselectedIconColor = MediumGrayText,
-                        unselectedTextColor = MediumGrayText
-                    ),
-                    modifier = Modifier.testTag("nav_buckets_tab")
-                )
-                NavigationBarItem(
-                    selected = currentTab == 2,
-                    onClick = { viewModel.setTab(2) },
-                    icon = { Icon(imageVector = cleaning_services, contentDescription = "Cleanup Tab") },
-                    label = { Text("Cleanup") },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = OnBackgroundPurple,
-                        selectedTextColor = OnBackgroundPurple,
-                        indicatorColor = ActivePillBg,
-                        unselectedIconColor = MediumGrayText,
-                        unselectedTextColor = MediumGrayText
-                    ),
-                    modifier = Modifier.testTag("nav_cleanup_tab")
-                )
+            }
 
-            }
-        },
-        floatingActionButton = {
-            if (currentTab != 3) {
-                FloatingActionButton(
-                    onClick = { viewModel.syncInbox() },
-                    containerColor = BrandTertiary,
-                    contentColor = DarkPurpleText,
-                    shape = RoundedCornerShape(22.dp),
-                    modifier = Modifier.testTag("fab_sync_reorganize")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Tap to sync with Gemini backend and trigger DB updates",
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
+            BottomNav(currentTab) { viewModel.setTab(it) }
         }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize()
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                // Main reactive loading indicators
-                if (isLoading) {
-                    LinearProgressIndicator(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(4.dp),
-                        color = BrandPrimary,
-                        trackColor = BrandSecondary
-                    )
-                }
 
-                // Header status banner (AI insights) - only visible on Inbox tab to conserve space
-                if (currentTab == 0) {
-                    GeminiInsightHeader(
-                        emails = emails,
-                        isConnected = isConnected,
-                        syncResult = syncResult,
-                        isMinimized = isInboxScrolled,
-                        onSyncClick = { viewModel.syncInbox() }
-                    )
-                }
-
-                // Decouple viewing based on tab
-                when (currentTab) {
-                    0 -> InboxView(
-                        emails = emails,
-                        listState = inboxListState,
-                        onEmailClick = { viewModel.selectEmail(it) },
-                        onToggleRead = { id, current -> viewModel.toggleReadStatus(id, current) },
-                        onArchive = { viewModel.archiveEmail(it) },
-                        onDelete = { viewModel.deleteEmail(it) },
-                        onMove = { showCategoryMoveDialog = it }
-                    )
-                    1 -> BucketsView(
-                        emails = emails,
-                        activeCategory = activeCategoryTab,
-                        onCategorySelect = { viewModel.setActiveCategoryTab(it) },
-                        onEmailClick = { viewModel.selectEmail(it) },
-                        onToggleRead = { id, current -> viewModel.toggleReadStatus(id, current) },
-                        onBulkAction = { category, list, action -> viewModel.performBulkAction(category, list, action) }
-                    )
-                    2 -> CleanupView(
-                        emails = emails,
-                        onDelete = { viewModel.deleteEmail(it) },
-                        onArchive = { viewModel.archiveEmail(it) },
-                        onBulkUnsubscribe = { unsubscribedIds ->
-                            viewModel.performBulkAction("Newsletter", unsubscribedIds, "delete")
-                        }
-                    )
-                    3 -> SettingsView(
-                        isConnected = isConnected,
-                        userName = userName,
-                        oauthEmailInput = userEmail,
-                        oauthNameInput = userName,
-                        themePreference = themePreference,
-                        onThemeChange = { viewModel.setThemePreference(it) },
-                        onEmailChange = { },
-                        onNameChange = { },
-                        onConnect = { name, email -> viewModel.connectOAuth(name, email) },
-                        onDisconnect = { viewModel.disconnectOAuth() }
-                    )
-                }
-            }
-
-            // On-demand summary and actions bottom sheet (custom floating panel for compact, safe layouts)
-            selectedEmail?.let { email ->
-                CardDetailsBottomSheet(
-                    email = email,
-                    isLoading = isSummaryLoading,
-                    onClose = { viewModel.selectEmail(null) },
-                    onActionSelected = { action ->
-                        if (action.lowercase().contains("delete")) {
-                            viewModel.deleteEmail(email.id)
-                        } else if (action.lowercase().contains("archive")) {
-                            viewModel.archiveEmail(email.id)
-                        } else {
-                            viewModel.toggleReadStatus(email.id, email.isRead)
-                            viewModel.selectEmail(null)
-                        }
+        DetailsSheet(
+            email = selectedEmail,
+            isLoading = isSummaryLoading,
+            onClose = { viewModel.selectEmail(null) },
+            onMove = { moveTarget = it },
+            onActionSelected = { email, action ->
+                val a = action.lowercase()
+                when {
+                    "delete" in a -> viewModel.deleteEmail(email.id)
+                    "archive" in a -> viewModel.archiveEmail(email.id)
+                    else -> {
+                        viewModel.toggleReadStatus(email.id, email.isRead)
+                        viewModel.selectEmail(null)
                     }
-                )
-            }
+                }
+            },
+        )
+    }
 
-            // Prompt Category Mover Dialogue
-            showCategoryMoveDialog?.let { email ->
-                AlertDialog(
-                    onDismissRequest = { showCategoryMoveDialog = null },
-                    title = { Text("Move Email Category") },
-                    text = {
-                        Column {
-                            Text("Current: ${email.category}", style = MaterialTheme.typography.bodyMedium)
-                            Spacer(modifier = Modifier.height(12.dp))
-                            val categories = listOf("Work", "Bill", "Newsletter", "Promotion", "Social")
-                            categories.forEach { cat ->
-                                Button(
-                                    onClick = {
-                                        viewModel.moveCategory(email.id, cat)
-                                        showCategoryMoveDialog = null
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (cat == email.category) BrandPrimary else LightSurfaceBg,
-                                        contentColor = if (cat == email.category) Color.White else OnBackgroundPurple
-                                    ),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp)
-                                ) {
-                                    Text(cat)
-                                }
-                            }
-                        }
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { showCategoryMoveDialog = null }) {
-                            Text("Cancel")
-                        }
-                    }
-                )
-            }
-        }
+    moveTarget?.let { target ->
+        MoveDialog(
+            current = target.category,
+            onPick = { viewModel.moveCategory(target.id, it); moveTarget = null },
+            onDismiss = { moveTarget = null },
+        )
     }
 }
 
-// Sparkle Gemini Header Card
-@Composable
-fun GeminiInsightHeader(
-    emails: List<EmailEntity>,
-    isConnected: Boolean,
-    syncResult: String?,
-    isMinimized: Boolean = false,
-    onSyncClick: () -> Unit
-) {
-    val unreadCount = emails.count { !it.isRead }
-    val categorizedCount = emails.count { it.category != "Uncategorized" }
-    
-    // Custom dynamic AI insights based on current email demographics
-    val workCount = emails.count { it.category == "Work" }
-    val billsCount = emails.count { it.category == "Bill" }
-    val unsubCount = emails.count { it.isUnsubscribeSuggested }
-    
-    val insightMessage = remember(workCount, billsCount, unsubCount, isConnected) {
-        if (!isConnected) {
-            "Simulating in local environment. Click to connect your real Google Workspace Account to fetch direct info."
-        } else if (emails.isEmpty()) {
-            "Refreshing your workspace mailbox safely. This takes just a moment to classify metadata with Gemini."
-        } else if (workCount > 4) {
-            "Work emails are spiking rapidly ($workCount unread). Would you like to review urgent threads?"
-        } else if (billsCount > 0) {
-            "You have $billsCount subscription payment bill due soon. Tapping 'Bills' helps auto-archive them successfully."
-        } else if (unsubCount > 0) {
-            "Gemini identified $unsubCount low-priority promotional senders. Smart Cleanup allows 1-tap bulk unsubscribe."
-        } else {
-            "Your mailbox is highly streamlined. 0 outstanding clutter or urgent alerts."
-        }
-    }
+private fun plural(n: Int, word: String) = if (n == 1) "1 $word" else "$n ${word}s"
 
-    Card(
+// ---------- Chrome ----------
+
+@Composable
+private fun Header(syncLine: String, isLoading: Boolean, onSync: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 24.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Gmail Assistant", color = kit.text, fontSize = 20.sp, fontWeight = FontWeight.Medium)
+            Text(syncLine, color = kit.muted, fontSize = 12.sp, modifier = Modifier.testTag("sync_status"))
+        }
+        KitButton(
+            text = "Sync",
+            onClick = onSync,
+            icon = SlimSync,
+            spinIcon = isLoading,
+            height = 40.dp,
+            modifier = Modifier.testTag("fab_sync_reorganize"),
+        )
+    }
+}
+
+@Composable
+private fun Hero(title: String, body: String, pill: String? = null) {
+    Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 20.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                title,
+                color = kit.text,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f, fill = false).testTag("gemini_insight_header_text"),
+            )
+            if (pill != null) {
+                Spacer(Modifier.width(10.dp))
+                KitPill(pill, accent = true)
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        mutedText(body, Modifier.testTag("gemini_insight_message"))
+    }
+}
+
+@Composable
+private fun BottomNav(selected: Int, onSelect: (Int) -> Unit) {
+    KitSegmented(
+        count = NavItems.size,
+        selected = selected,
+        onSelect = onSelect,
+        trayShape = KitShapes.nav,
+        thumbShape = KitShapes.navThumb,
+        cellHeight = 56.dp,
+        tags = NavItems.map { it.tag },
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("gemini_insight_card"),
-        shape = RoundedCornerShape(26.dp),
-        colors = CardDefaults.cardColors(containerColor = BrandSecondary)
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "GEMINI INSIGHT",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = DarkPurpleText,
-                        letterSpacing = 1.25.sp,
-                        modifier = Modifier.testTag("gemini_insight_header_text")
-                    )
-                    Text(
-                        text = if (emails.isEmpty()) "Securing connection..." else "$categorizedCount emails categorized",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = DarkPurpleText
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(DarkPurpleText)
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = if (isConnected) "OAUTH ACTIVE" else "MOCK VAULT",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
-            }
-            AnimatedVisibility(visible = !isMinimized) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = insightMessage,
-                        fontSize = 14.sp,
-                        color = DarkPurpleText.copy(alpha = 0.85f),
-                        lineHeight = 19.sp,
-                        modifier = Modifier.testTag("gemini_insight_message")
-                    )
-                    
-                    syncResult?.let {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = it,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = BrandPrimary,
-                            textAlign = TextAlign.Start
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ---------------- INBOX VIEW (Tab 0) ----------------
-@Composable
-fun InboxView(
-    emails: List<EmailEntity>,
-    listState: androidx.compose.foundation.lazy.LazyListState,
-    onEmailClick: (EmailEntity) -> Unit,
-    onToggleRead: (String, Boolean) -> Unit,
-    onArchive: (String) -> Unit,
-    onDelete: (String) -> Unit,
-    onMove: (EmailEntity) -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Text(
-            text = "Your Workspace Inbox",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = MediumGrayText.copy(alpha = 0.85f),
-            letterSpacing = 1.sp,
-            modifier = Modifier.padding(top = 4.dp)
+            .navigationBarsPadding()
+            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp),
+    ) { i, isSelected ->
+        val tint by animateColorAsState(
+            if (isSelected) kit.onAccent else kit.text.copy(alpha = 0.7f),
+            KitMotion.fill(),
+            label = "navTint",
         )
-
-        if (emails.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = inbox,
-                        contentDescription = "Inbox status empty",
-                        tint = MediumGrayText.copy(alpha = 0.5f),
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Text(
-                        text = "Your Inbox is completely clean!",
-                        fontWeight = FontWeight.Medium,
-                        color = MediumGrayText,
-                        fontSize = 15.sp
-                    )
-                    Text(
-                        text = "Force refresh using the refresh button.",
-                        color = MediumGrayText.copy(alpha = 0.7f),
-                        fontSize = 12.sp
-                    )
-                }
-            }
-        } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .testTag("inbox_lazy_column"),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(emails, key = { it.id }) { email ->
-                    EmailRowItem(
-                        email = email,
-                        onClick = { onEmailClick(email) },
-                        onToggleRead = { onToggleRead(email.id, email.isRead) },
-                        onArchive = { onArchive(email.id) },
-                        onDelete = { onDelete(email.id) },
-                        onMove = { onMove(email) }
-                    )
-                }
-            }
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Icon(NavItems[i].icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+            Text(NavItems[i].label, color = tint, fontSize = 10.sp, fontWeight = FontWeight.Medium)
         }
     }
 }
 
-// ---------------- BUCKETS VIEW (Tab 1) ----------------
+// ---------- Mail cards ----------
+
+private fun senderName(email: EmailEntity) =
+    email.sender.split("<")[0].trim().ifEmpty { email.senderEmail }
+
 @Composable
-fun BucketsView(
+private fun EmailCard(
+    email: EmailEntity,
+    onClick: () -> Unit,
+    onToggleRead: () -> Unit,
+    onArchive: () -> Unit,
+    onDelete: () -> Unit,
+    onMove: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val bg by animateColorAsState(if (email.isRead) kit.cardPlain else kit.card, KitMotion.fill(), label = "cardBg")
+    Column(
+        modifier = modifier
+            .testTag("email_row_item_${email.id}")
+            .kitClickable(scaleTo = 0.98f, onClick = onClick)
+            .fillMaxWidth()
+            .clip(KitShapes.card)
+            .background(bg)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                senderName(email),
+                color = kit.text,
+                fontSize = 14.sp,
+                fontWeight = if (email.isRead) FontWeight.Normal else FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(formatDate(email.timestamp), color = kit.muted, fontSize = 11.sp)
+        }
+        Text(email.subject, color = kit.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            email.snippet,
+            color = kit.muted,
+            fontSize = 12.sp,
+            lineHeight = 17.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            KitPill(
+                email.category,
+                Modifier.clip(CircleShape).clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onMove,
+                ).testTag("action_move_${email.id}"),
+            )
+            if (email.isClutter) KitPill("Low engagement")
+            Spacer(Modifier.weight(1f))
+            KitIconButton(
+                if (email.isRead) SlimMarkUnread else SlimMarkRead,
+                if (email.isRead) "Mark unread" else "Mark read",
+                onToggleRead,
+                Modifier.testTag("action_toggle_read_${email.id}"),
+                size = 36.dp,
+            )
+            KitIconButton(SlimArchive, "Archive", onArchive, Modifier.testTag("action_archive_${email.id}"), size = 36.dp)
+            KitIconButton(
+                SlimDelete, "Delete", onDelete,
+                Modifier.testTag("action_delete_${email.id}"), danger = true, size = 36.dp,
+            )
+        }
+    }
+}
+
+private fun formatDate(ts: Long) = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(ts))
+
+private val ListPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp)
+
+@Composable
+private fun EmptyState(text: String, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+        mutedText(text)
+    }
+}
+
+@Composable
+private fun InboxView(
+    emails: List<EmailEntity>,
+    onEmailClick: (EmailEntity) -> Unit,
+    onToggleRead: (EmailEntity) -> Unit,
+    onArchive: (EmailEntity) -> Unit,
+    onDelete: (EmailEntity) -> Unit,
+    onMove: (EmailEntity) -> Unit,
+) {
+    if (emails.isEmpty()) {
+        EmptyState("Your inbox is empty. Tap Sync to fetch mail.")
+        return
+    }
+    LazyColumn(
+        Modifier.fillMaxSize().testTag("inbox_lazy_column"),
+        contentPadding = ListPadding,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(emails, key = { it.id }) { email ->
+            EmailCard(
+                email,
+                onClick = { onEmailClick(email) },
+                onToggleRead = { onToggleRead(email) },
+                onArchive = { onArchive(email) },
+                onDelete = { onDelete(email) },
+                onMove = { onMove(email) },
+                modifier = Modifier.animateItem(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun BucketsView(
     emails: List<EmailEntity>,
     activeCategory: String,
     onCategorySelect: (String) -> Unit,
     onEmailClick: (EmailEntity) -> Unit,
-    onToggleRead: (String, Boolean) -> Unit,
-    onBulkAction: (String, List<String>, String) -> Unit
+    onToggleRead: (EmailEntity) -> Unit,
+    onArchive: (EmailEntity) -> Unit,
+    onDelete: (EmailEntity) -> Unit,
+    onMove: (EmailEntity) -> Unit,
+    onBulkAction: (String, List<String>, String) -> Unit,
 ) {
-    val categories = listOf("Work", "Bill", "Newsletter", "Promotion", "Social")
-    val filteredEmails = emails.filter { it.category == activeCategory }
+    val filtered = emails.filter { it.category == activeCategory }
+    val ids = filtered.map { it.id }
+    val selectedIndex = Buckets.indexOfFirst { it.first == activeCategory }.coerceAtLeast(0)
 
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+    LazyColumn(
+        Modifier.fillMaxSize().testTag("buckets_lazy_column"),
+        contentPadding = ListPadding,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Categories horizontal tabs
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            categories.forEach { cat ->
-                val count = emails.count { it.category == cat }
-                val isSelected = activeCategory == cat
-                
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (isSelected) ActivePillBg else MaterialTheme.colorScheme.surface)
-                        .border(
-                            BorderStroke(1.dp, if (isSelected) BrandPrimary else SurfaceBorder),
-                            shape = RoundedCornerShape(14.dp)
-                        )
-                        .clickable { onCategorySelect(cat) }
-                        .padding(vertical = 8.dp, horizontal = 4.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = getCategoryIcon(cat),
-                            contentDescription = cat,
-                            tint = if (isSelected) BrandPrimary else MediumGrayText,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = cat,
-                            fontSize = 11.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) ActivePillText else MediumGrayText
-                        )
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) BrandPrimary else LightRippleBg)
-                                .padding(horizontal = 6.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = count.toString(),
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isSelected) Color.White else MediumGrayText
-                            )
-                        }
-                    }
-                }
+        item {
+            KitSegmented(
+                count = Buckets.size,
+                selected = selectedIndex,
+                onSelect = { onCategorySelect(Buckets[it].first) },
+                tags = Buckets.map { "bucket_tab_${it.first}" },
+            ) { i, isSelected ->
+                SegmentLabel(Buckets[i].second, isSelected, emails.count { it.category == Buckets[i].first })
             }
         }
-
-        // Suggested 1-tap bulk actions header
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = LightSurfaceBg),
-            border = BorderStroke(1.dp, SurfaceBorder.copy(alpha = 0.5f))
-        ) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "1-TAP BUCKET ACTIONS",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MediumGrayText,
-                            letterSpacing = 1.sp
-                        )
-                    }
-                    Icon(
-                        imageVector = wand_shine,
-                        contentDescription = "Gemini intelligence bulk actions",
-                        tint = BrandPrimary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            val ids = filteredEmails.map { it.id }
-                            onBulkAction(activeCategory, ids, "mark_as_read")
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface),
-                        enabled = filteredEmails.isNotEmpty(),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.weight(1f).testTag("bulk_read_btn"),
-                        border = BorderStroke(1.dp, SurfaceBorder)
-                    ) {
-                        Text("Mark Read", fontSize = 11.sp, color = BrandPrimary, fontWeight = FontWeight.Bold)
-                    }
-                    Button(
-                        onClick = {
-                            val ids = filteredEmails.map { it.id }
-                            onBulkAction(activeCategory, ids, "archive")
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface),
-                        enabled = filteredEmails.isNotEmpty(),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.weight(1f).testTag("bulk_archive_btn"),
-                        border = BorderStroke(1.dp, SurfaceBorder)
-                    ) {
-                        Text("Archive", fontSize = 11.sp, color = BrandPrimary, fontWeight = FontWeight.Bold)
-                    }
-                    Button(
-                        onClick = {
-                            val ids = filteredEmails.map { it.id }
-                            onBulkAction(activeCategory, ids, "delete")
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surface),
-                        enabled = filteredEmails.isNotEmpty(),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.weight(1f).testTag("bulk_delete_btn"),
-                        border = BorderStroke(1.dp, SurfaceBorder)
-                    ) {
-                        Text("Delete All", fontSize = 11.sp, color = BrandPrimary, fontWeight = FontWeight.Bold)
-                    }
-                }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                KitButton("Mark read", { onBulkAction(activeCategory, ids, "mark_as_read") },
+                    Modifier.weight(1f).testTag("bulk_read_btn"), enabled = ids.isNotEmpty())
+                KitButton("Archive", { onBulkAction(activeCategory, ids, "archive") },
+                    Modifier.weight(1f).testTag("bulk_archive_btn"), enabled = ids.isNotEmpty())
+                KitButton("Delete all", { onBulkAction(activeCategory, ids, "delete") },
+                    Modifier.weight(1f).testTag("bulk_delete_btn"), danger = true, enabled = ids.isNotEmpty())
             }
         }
-
-        // Filtered Email Lists
-        if (filteredEmails.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = "Category pristine",
-                        tint = BrandPrimary,
-                        modifier = Modifier.size(36.dp)
-                    )
-                    Text(
-                        text = "Category '$activeCategory' is completely clean!",
-                        fontWeight = FontWeight.Medium,
-                        color = MediumGrayText,
-                        fontSize = 13.sp
-                    )
-                }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(filteredEmails, key = { it.id }) { email ->
-                    EmailRowItem(
-                        email = email,
-                        onClick = { onEmailClick(email) },
-                        onToggleRead = { onToggleRead(email.id, email.isRead) },
-                        onArchive = {},
-                        onDelete = {},
-                        onMove = {},
-                        showActionButtons = false // simple listing for cleaner view inside categories
-                    )
-                }
-            }
+        if (filtered.isEmpty()) {
+            item { mutedText("Nothing in this bucket.", Modifier.padding(vertical = 24.dp, horizontal = 8.dp)) }
+        }
+        items(filtered, key = { it.id }) { email ->
+            EmailCard(
+                email,
+                onClick = { onEmailClick(email) },
+                onToggleRead = { onToggleRead(email) },
+                onArchive = { onArchive(email) },
+                onDelete = { onDelete(email) },
+                onMove = { onMove(email) },
+                modifier = Modifier.animateItem(),
+            )
         }
     }
 }
 
-// ---------------- CLEANUP VIEW (Tab 2) ----------------
+// ---------- Cleanup ----------
+
 @Composable
-fun CleanupView(
+private fun CleanupView(
     emails: List<EmailEntity>,
-    onDelete: (String) -> Unit,
-    onArchive: (String) -> Unit,
-    onBulkUnsubscribe: (List<String>) -> Unit
+    onArchive: (EmailEntity) -> Unit,
+    onDelete: (EmailEntity) -> Unit,
+    onBulkUnsubscribe: (List<String>) -> Unit,
 ) {
-    val unsubsList = emails.filter { it.isUnsubscribeSuggested }
-    val clutterList = emails.filter { it.isClutter }
+    val unsubs = emails.filter { it.isUnsubscribeSuggested }
+    val clutter = emails.filter { it.isClutter }
+    val checked = remember { mutableStateMapOf<String, Boolean>() }
+    val chosen = unsubs.filter { checked[it.id] ?: true }
 
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+    LazyColumn(
+        Modifier.fillMaxSize().testTag("cleanup_lazy_column"),
+        contentPadding = ListPadding,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            text = "Clean Cleanup Console",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            color = MediumGrayText.copy(alpha = 0.85f),
-            letterSpacing = 1.sp,
-            modifier = Modifier.padding(top = 4.dp)
-        )
-
-        // Bulk Unsubscribe suggestions
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = BorderStroke(1.dp, SurfaceBorder)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "UNSUBSCRIBE SUGGESTIONS",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MediumGrayText,
-                            letterSpacing = 1.sp
-                        )
-                        Text(
-                            text = "${unsubsList.size} lists with low engagement",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = OnBackgroundPurple
-                        )
-                    }
-                    if (unsubsList.isNotEmpty()) {
-                        TextButton(
-                            onClick = { onBulkUnsubscribe(unsubsList.map { it.id }) },
-                            modifier = Modifier.testTag("bulk_unsubscribe_btn")
-                        ) {
-                            Text("Unsubscribe All", color = BrandPrimary, fontWeight = FontWeight.Bold)
+        item {
+            Column(Modifier.kitCard().padding(horizontal = 8.dp, vertical = 14.dp)) {
+                CardTitle("Unsubscribe suggestions", unsubs.size)
+                if (unsubs.isEmpty()) {
+                    mutedText("No senders to unsubscribe from.", Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                }
+                unsubs.forEach { email ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .kitClickable(scaleTo = 0.98f) { checked[email.id] = !(checked[email.id] ?: true) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        KitCheckbox(checked[email.id] ?: true, { checked[email.id] = it })
+                        Column(Modifier.weight(1f)) {
+                            Text(senderName(email), color = kit.text, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(email.subject, color = kit.muted, fontSize = 12.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
-
-                if (unsubsList.isEmpty()) {
-                    Text(
-                        text = "Nice! No low-priority subscription newsletters flagged.",
-                        fontSize = 12.sp,
-                        color = MediumGrayText
+                if (unsubs.isNotEmpty()) {
+                    KitButton(
+                        text = "Unsubscribe from ${chosen.size}",
+                        onClick = { onBulkUnsubscribe(chosen.map { it.id }) },
+                        enabled = chosen.isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).padding(top = 8.dp)
+                            .testTag("bulk_unsubscribe_btn"),
                     )
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 160.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(unsubsList, key = { it.id }) { email ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(LightSurfaceBg)
-                                    .padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = email.sender.split("<")[0].trim(),
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = OnBackgroundPurple,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = email.subject,
-                                        fontSize = 10.sp,
-                                        color = MediumGrayText,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                IconButton(
-                                    onClick = { onDelete(email.id) },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = delete_sweep,
-                                        contentDescription = "Delete and Unsubscribe",
-                                        tint = BrandPrimary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
-
-        // Low priority clutter listing
-        Card(
-            modifier = Modifier.fillMaxWidth().weight(1f),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = BorderStroke(1.dp, SurfaceBorder)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = "LOW-PRIORITY CLUTTER FLAGGED BY GEMINI",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MediumGrayText,
-                    letterSpacing = 1.sp
-                )
-
-                if (clutterList.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
+        item {
+            Column(Modifier.kitCard().padding(horizontal = 8.dp, vertical = 14.dp)) {
+                CardTitle("Low-priority clutter", clutter.size)
+                if (clutter.isEmpty()) {
+                    mutedText("Nothing to clean up.", Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                }
+                clutter.forEach { email ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(
-                            text = "Zero clutter emails detected in your inbox.",
-                            fontWeight = FontWeight.Medium,
-                            color = MediumGrayText,
-                            fontSize = 13.sp
-                        )
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(clutterList, key = { it.id }) { email ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .border(BorderStroke(1.dp, SurfaceBorder), shape = RoundedCornerShape(12.dp))
-                                    .padding(10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .background(LightRippleBg),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = delete_sweep, // represents clutter clearing
-                                        contentDescription = "Quick Delete",
-                                        tint = MediumGrayText,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = email.subject,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = OnBackgroundPurple,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "From: ${email.sender.split("<")[0].trim()}",
-                                        fontSize = 10.sp,
-                                        color = MediumGrayText,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Row {
-                                    IconButton(
-                                        onClick = { onArchive(email.id) },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = archive,
-                                            contentDescription = "Archive",
-                                            tint = BrandPrimary,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = { onDelete(email.id) },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = delete_sweep,
-                                            contentDescription = "Delete",
-                                            tint = BrandPrimary,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-                            }
+                        Column(Modifier.weight(1f)) {
+                            Text(senderName(email), color = kit.text, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(email.subject, color = kit.muted, fontSize = 12.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
+                        KitIconButton(SlimArchive, "Archive", { onArchive(email) },
+                            Modifier.testTag("clutter_archive_${email.id}"), size = 36.dp)
+                        KitIconButton(SlimDelete, "Delete", { onDelete(email) },
+                            Modifier.testTag("clutter_delete_${email.id}"), danger = true, size = 36.dp)
                     }
                 }
             }
@@ -955,19 +567,29 @@ fun CleanupView(
     }
 }
 
-// ---------------- SETTINGS VIEW (Tab 3 - Google OAuth Configuration Vault) ----------------
 @Composable
-fun SettingsView(
+private fun CardTitle(title: String, count: Int) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(title, color = kit.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+        CountBadge(count, selected = false)
+    }
+}
+
+// ---------- Settings ----------
+
+@Composable
+private fun SettingsView(
     isConnected: Boolean,
     userName: String,
-    oauthEmailInput: String,
-    oauthNameInput: String,
+    userEmail: String,
     themePreference: String,
     onThemeChange: (String) -> Unit,
-    onEmailChange: (String) -> Unit,
-    onNameChange: (String) -> Unit,
     onConnect: (String, String) -> Unit,
-    onDisconnect: () -> Unit
+    onDisconnect: () -> Unit,
 ) {
     val context = LocalContext.current
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -983,591 +605,180 @@ fun SettingsView(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().testTag("settings_view"),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        Modifier.fillMaxSize().testTag("settings_view"),
+        contentPadding = ListPadding,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Text(
-                text = "Authorization & API Vault",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
-                letterSpacing = 1.sp,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-        }
-
-        item {
             if (isConnected) {
-                // Verified connected visual identity card
-                Card(
-                    modifier = Modifier.fillMaxWidth().testTag("oauth_connected_card"),
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, SurfaceBorder)
+                Column(
+                    Modifier.kitCard().padding(16.dp).testTag("oauth_connected_card"),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    Column(
-                        modifier = Modifier.padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(64.dp)
-                                .clip(CircleShape)
-                                .background(BrandSecondary),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = userName.take(1).uppercase(),
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = BrandPrimary
-                            )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Avatar(userName)
+                        Column(Modifier.weight(1f)) {
+                            Text(userName, color = kit.text, fontSize = 16.sp, fontWeight = FontWeight.Medium,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(userEmail, color = kit.muted, fontSize = 12.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = userName,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = oauthEmailInput,
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(LightRippleBg)
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = "OAuth Verification Safe",
-                                tint = BrandPrimary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "Verified Google Vault Connection",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-
-                        Button(
-                            onClick = onDisconnect,
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = BrandPrimary),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth().testTag("disconnect_oauth_btn")
-                        ) {
-                            Text("Disconnect Account")
-                        }
+                        KitPill("Connected", accent = true)
+                    }
+                    Box(Modifier.testTag("oauth_disconnect_card")) {
+                        KitButton("Disconnect", onDisconnect, Modifier.fillMaxWidth().testTag("disconnect_oauth_btn"),
+                            danger = true)
                     }
                 }
             } else {
-                // Not connected: Auth inputs
-                Card(
-                    modifier = Modifier.fillMaxWidth().testTag("oauth_disconnect_card"),
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, SurfaceBorder)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        Text(
-                            text = "CONNECT TO GMAIL VIA OAUTH",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            letterSpacing = 1.sp
-                        )
-                        
-                        Text(
-                            text = "Unlock smart categorization by linking your real Gmail inbox through Google OAuth.",
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        Button(
-                            onClick = {
-                                val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                                    .requestEmail()
-                                    .requestScopes(Scope("https://www.googleapis.com/auth/gmail.readonly"))
-                                    .build()
-                                val googleSignInClient = GoogleSignIn.getClient(context, gso)
-                                launcher.launch(googleSignInClient.signInIntent)
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth().testTag("connect_oauth_btn")
-                        ) {
-                            Text("Sign in with Google")
+                Column(Modifier.kitCard().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Avatar(userName)
+                        Column(Modifier.weight(1f)) {
+                            Text("Not connected", color = kit.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                            mutedText("Link your Gmail to sort real mail. Access is read-only.", size = 12)
                         }
                     }
+                    KitButton(
+                        "Connect Google account",
+                        {
+                            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                                .requestEmail()
+                                .requestScopes(Scope("https://www.googleapis.com/auth/gmail.readonly"))
+                                .build()
+                            launcher.launch(GoogleSignIn.getClient(context, gso).signInIntent)
+                        },
+                        Modifier.fillMaxWidth().testTag("connect_oauth_btn"),
+                        solid = true,
+                    )
                 }
             }
         }
-
-        // Feature: APP THEME Selection Card
         item {
-            Card(
-                modifier = Modifier.fillMaxWidth().testTag("theme_selection_card"),
-                shape = RoundedCornerShape(22.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, SurfaceBorder)
+            val values = listOf("light" to "Light", "system" to "System", "dark" to "Dark")
+            Column(
+                Modifier.kitCard().padding(16.dp).testTag("theme_selection_card"),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text(
-                        text = "APP THEME",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        letterSpacing = 1.sp
-                    )
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(
-                            Triple("light", "Light Mode", light_mode),
-                            Triple("dark", "Dark Mode", dark_mode),
-                            Triple("system", "System", Icons.Default.Settings)
-                        ).forEach { (modeValue, modeLabel, modeIcon) ->
-                            val isSelected = themePreference == modeValue
-                            
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isSelected) BrandPrimary else MaterialTheme.colorScheme.surfaceVariant)
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (isSelected) BrandPrimary else SurfaceBorder,
-                                        shape = RoundedCornerShape(12.dp)
-                                    )
-                                    .clickable { onThemeChange(modeValue) }
-                                    .padding(vertical = 12.dp, horizontal = 4.dp)
-                                    .testTag("theme_btn_$modeValue"),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(
-                                        imageVector = modeIcon,
-                                        contentDescription = modeLabel,
-                                        tint = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = modeLabel,
-                                        color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+                Text("Theme", color = kit.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                KitSegmented(
+                    count = values.size,
+                    selected = values.indexOfFirst { it.first == themePreference }.coerceAtLeast(0),
+                    onSelect = { onThemeChange(values[it].first) },
+                    tags = values.map { "theme_btn_${it.first}" },
+                ) { i, isSelected -> SegmentLabel(values[i].second, isSelected) }
             }
         }
-
         item {
-            Card(
-                modifier = Modifier.fillMaxWidth().testTag("settings_about_card"),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            Column(
+                Modifier.kitCard().padding(16.dp).testTag("settings_about_card"),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "ABOUT GMAIL ASSISTANT",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        letterSpacing = 1.sp
-                    )
-                    Text(
-                        text = "Gmail Assistant utilizes Gemini text models and Room Db configurations directly on Android. By default, it never reads or uploads raw body contents—keeping token context small, lightweight, fast, and completely secure. Your data never touches a third-party server. Only Google's own infrastructure is involved.",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        lineHeight = 16.sp
-                    )
-                }
+                Text("About", color = kit.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                mutedText("Gmail Assistant sorts your inbox into buckets with Gemini and suggests what to clean up. It never sends mail on your behalf.")
             }
         }
     }
 }
 
-// ---------------- HELPER COMPONENTS ----------------
-
 @Composable
-fun EmailRowItem(
-    email: EmailEntity,
-    onClick: () -> Unit,
-    onToggleRead: () -> Unit,
-    onArchive: () -> Unit,
-    onDelete: () -> Unit,
-    onMove: () -> Unit,
-    showActionButtons: Boolean = true
-) {
-    val dateText = remember(email.timestamp) {
-        val sdf = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
-        sdf.format(Date(email.timestamp))
-    }
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .testTag("email_row_item_${email.id}"),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (email.isRead) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant
-        ),
-        border = BorderStroke(1.dp, if (email.isRead) SurfaceBorder.copy(alpha = 0.5f) else BrandSecondary)
+private fun Avatar(name: String) {
+    Box(
+        Modifier.size(48.dp).clip(CircleShape).background(kit.accent),
+        contentAlignment = Alignment.Center,
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            // Meta Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    // Category Badge Indicator
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(getCategoryColor(email.category).copy(alpha = 0.15f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = email.category,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = getCategoryColor(email.category)
-                        )
-                    }
-
-                    if (email.isClutter) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFFE53935).copy(alpha = 0.1f))
-                                .padding(horizontal = 4.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = "LOW ENGAGEMENT",
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFD32F2F)
-                            )
-                        }
-                    }
-                }
-
-                Text(
-                    text = dateText,
-                    fontSize = 11.sp,
-                    color = MediumGrayText
-                )
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Subject / Sender
-            Text(
-                text = email.sender.split("<")[0].trim(),
-                fontWeight = if (email.isRead) FontWeight.Medium else FontWeight.Bold,
-                fontSize = 14.sp,
-                color = OnBackgroundPurple,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            
-            Text(
-                text = email.subject,
-                fontWeight = if (email.isRead) FontWeight.Normal else FontWeight.Bold,
-                fontSize = 13.sp,
-                color = if (email.isRead) MediumGrayText else OnBackgroundPurple,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // Snippet
-            Text(
-                text = email.snippet,
-                fontSize = 12.sp,
-                color = MediumGrayText,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                lineHeight = 16.sp
-            )
-
-            if (showActionButtons) {
-                Spacer(modifier = Modifier.height(10.dp))
-                HorizontalDivider(color = SurfaceBorder.copy(alpha = 0.4f))
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = onToggleRead,
-                        modifier = Modifier.size(32.dp).testTag("action_toggle_read_${email.id}")
-                    ) {
-                        Icon(
-                            imageVector = if (email.isRead) Icons.Default.Check else Icons.Default.Email,
-                            contentDescription = "Toggle Read",
-                            tint = BrandPrimary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        TextButton(
-                            onClick = onMove,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            modifier = Modifier.height(30.dp)
-                        ) {
-                            Text("Move", fontSize = 11.sp, color = BrandPrimary, fontWeight = FontWeight.Bold)
-                        }
-                        IconButton(
-                            onClick = onArchive,
-                            modifier = Modifier.size(32.dp).testTag("action_archive_${email.id}")
-                        ) {
-                            Icon(
-                                imageVector = archive,
-                                contentDescription = "Archive thread",
-                                tint = BrandPrimary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                        IconButton(
-                            onClick = onDelete,
-                            modifier = Modifier.size(32.dp).testTag("action_delete_${email.id}")
-                        ) {
-                            Icon(
-                                imageVector = delete_sweep,
-                                contentDescription = "Delete thread",
-                                tint = BrandPrimary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
+        Text(
+            name.trim().firstOrNull()?.uppercase() ?: "?",
+            color = kit.onAccent,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 
-// Bottom details view for thread summary on-demand
+// ---------- Sheet and dialog ----------
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun CardDetailsBottomSheet(
-    email: EmailEntity,
+private fun DetailsSheet(
+    email: EmailEntity?,
     isLoading: Boolean,
     onClose: () -> Unit,
-    onActionSelected: (String) -> Unit
+    onMove: (EmailEntity) -> Unit,
+    onActionSelected: (EmailEntity, String) -> Unit,
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("details_bottom_sheet")
-            .padding(16.dp),
-        shape = RoundedCornerShape(26.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, SurfaceBorder)
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(BrandPrimary),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = wand_shine,
-                            contentDescription = "Gemini AI",
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                    Text(
-                        text = "Smarter Thread Summary",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = OnBackgroundPurple
-                    )
-                }
-                IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
-                    Icon(imageVector = Icons.Default.Close, contentDescription = "Close panel", tint = MediumGrayText)
-                }
-            }
+    var shown by remember { mutableStateOf<EmailEntity?>(null) }
+    LaunchedEffect(email) { if (email != null) shown = email }
+    val visible = email != null
+    val content = email ?: shown
 
-            HorizontalDivider()
+    BackHandler(enabled = visible) { onClose() }
 
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(getCategoryColor(email.category).copy(alpha = 0.15f))
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = email.category.uppercase(),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = getCategoryColor(email.category)
-                    )
-                }
-                Text(
-                    text = email.sender.split("<")[0].trim(),
-                    fontSize = 12.sp,
-                    color = MediumGrayText,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-
-            Text(
-                text = email.subject,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = OnBackgroundPurple
+    Box(Modifier.fillMaxSize()) {
+        AnimatedVisibility(visible, enter = fadeIn(KitMotion.slide()), exit = fadeOut(KitMotion.slide())) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onClose() },
             )
-
-            // Real Stateless summary presentation
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = LightSurfaceBg),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = "GEMINI SUMMARY",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = BrandPrimary,
-                            letterSpacing = 1.sp
-                        )
-                        if (isLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(10.dp), strokeWidth = 1.5.dp, color = BrandPrimary)
-                        }
-                    }
-                    
-                    if (isLoading) {
-                        Text(
-                            text = "Consulting Gemini AI to summarize thread header...",
-                            fontSize = 12.sp,
-                            color = MediumGrayText
-                        )
-                    } else {
-                        Text(
-                            text = email.summary ?: "Successfully generated. Summarizing metadata securely.",
-                            fontSize = 13.sp,
-                            color = OnBackgroundPurple,
-                            lineHeight = 18.sp
-                        )
-                    }
-                }
-            }
-
-            // Stateles client snippet disclaimer
-            Column {
-                Text(
-                    text = "PARTIAL METADATA BODY SNIPPET",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MediumGrayText,
-                    letterSpacing = 1.sp
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = email.snippet,
-                    fontSize = 12.sp,
-                    color = MediumGrayText,
-                    lineHeight = 16.sp,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-
-            // Smart Next Actions Suggestions
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "GEMINI RECOMMENDED ACTIONS",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MediumGrayText,
-                    letterSpacing = 1.sp
-                )
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+        }
+        AnimatedVisibility(
+            visible,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically(KitMotion.slide()) { it },
+            exit = slideOutVertically(KitMotion.slide()) { it },
+        ) {
+            if (content != null) {
+                Column(
+                    Modifier
+                        .testTag("details_bottom_sheet")
+                        .fillMaxWidth()
+                        .clip(KitShapes.sheet)
+                        .background(kit.panel)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+                        .navigationBarsPadding()
+                        .heightIn(max = 640.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    val fallbackActions = listOf("Reply directly", "Snooze 1 Day", "Archive thread")
-                    val actions = remember(email.suggestedActions) {
-                        if (email.suggestedActions.isNullOrBlank()) fallbackActions else email.suggestedActions.split(",")
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        KitPill(
+                            content.category,
+                            Modifier.clip(CircleShape).clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) { onMove(content) },
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(formatDate(content.timestamp), color = kit.muted, fontSize = 12.sp)
                     }
-                    
-                    actions.forEach { action ->
-                        Button(
-                            onClick = { onActionSelected(action) },
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("recommended_action_${action.replace(" ", "_")}"),
-                            colors = ButtonDefaults.buttonColors(containerColor = BrandPrimary),
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = action,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
+                    Text(content.subject, color = kit.text, fontSize = 20.sp, fontWeight = FontWeight.Medium, lineHeight = 26.sp)
+                    mutedText("From ${senderName(content)}", size = 12)
+
+                    Column(Modifier.kitCard(kit.mist).padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Summary", color = kit.text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        val summary = when {
+                            content.summary != null -> content.summary
+                            isLoading -> "Summarizing this thread..."
+                            else -> "No summary available."
+                        }
+                        Text(summary ?: "", color = kit.text, fontSize = 14.sp, lineHeight = 20.sp)
+                    }
+
+                    Text(content.snippet, color = kit.muted, fontSize = 14.sp, lineHeight = 21.sp)
+
+                    val actions = content.suggestedActions
+                        ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: listOf("Reply directly", "Snooze 1 Day", "Archive thread")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        actions.forEach { action ->
+                            KitButton(
+                                action,
+                                { onActionSelected(content, action) },
+                                Modifier.testTag("recommended_action_${action.replace(" ", "_")}"),
                             )
                         }
                     }
@@ -1577,25 +788,23 @@ fun CardDetailsBottomSheet(
     }
 }
 
-private fun getCategoryIcon(cat: String): ImageVector {
-    return when (cat) {
-        "Work" -> work
-        "Bill" -> currency_rupee
-        "Newsletter" -> newspaper
-        "Promotion" -> campaign
-        "Social" -> groups
-        else -> account_circle
-    }
-}
-
 @Composable
-private fun getCategoryColor(cat: String): Color {
-    val isDark = MaterialTheme.colorScheme.primary == Color(0xFF8AB4F8)
-    return when (cat) {
-        "Work" -> if (isDark) Color(0xFF7DD3FC) else Color(0xFF4285F4)
-        "Bill" -> if (isDark) Color(0xFFEE675C) else Color(0xFFEA4335)
-        "Newsletter" -> if (isDark) Color(0xFFFDD663) else Color(0xFFFBBC05)
-        "Promotion" -> if (isDark) Color(0xFF81C995) else Color(0xFF34A853)
-        else -> if (isDark) Color(0xFF9AA0A6) else Color(0xFF5F6368)
+private fun MoveDialog(current: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().clip(KitShapes.card).background(kit.panel).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Move to", color = kit.text, fontSize = 18.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(bottom = 4.dp))
+            MoveCategories.forEach { category ->
+                KitButton(
+                    category,
+                    { onPick(category) },
+                    Modifier.fillMaxWidth().testTag("move_to_$category"),
+                    solid = category == current,
+                )
+            }
+        }
     }
 }
