@@ -9,7 +9,7 @@
   <img alt="Platform" src="https://img.shields.io/badge/Android-7.0%2B-3DDC84?logo=android&logoColor=white">
   <img alt="Kotlin and Compose" src="https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7F52FF?logo=kotlin&logoColor=white">
   <img alt="Privacy" src="https://img.shields.io/badge/data-stays%20on%20device-2ea44f">
-  <a href="docs/LICENSE.md"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <a href="LICENSE.md"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
 Most inboxes fill up with receipts, newsletters, social alerts and promotions that bury the few emails you need to read. Gmail Assistant reads your inbox, puts every email into a bucket, and lets you archive, delete or mark a whole bucket as read with one button.
@@ -122,4 +122,4 @@ Current progress and open work are tracked in [PROGRESS.md](docs/PROGRESS.md).
 
 ## License
 
-MIT. See [LICENSE.md](docs/LICENSE.md).
+MIT. See [LICENSE.md](LICENSE.md).
