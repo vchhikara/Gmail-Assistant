@@ -153,6 +153,15 @@ fun SmartGmailHome(
                 }
             }
 
+            if (currentTab == 1) {
+                BucketControls(
+                    emails = emails,
+                    activeCategory = activeCategoryTab,
+                    onCategorySelect = { viewModel.setActiveCategoryTab(it) },
+                    onBulkAction = { category, ids, action -> viewModel.performBulkAction(category, ids, action) },
+                )
+            }
+
             Box(
                 Modifier
                     .weight(1f)
@@ -177,13 +186,11 @@ fun SmartGmailHome(
                         1 -> BucketsView(
                             emails = emails,
                             activeCategory = activeCategoryTab,
-                            onCategorySelect = { viewModel.setActiveCategoryTab(it) },
                             onEmailClick = { viewModel.selectEmail(it) },
                             onToggleRead = { viewModel.toggleReadStatus(it.id, it.isRead) },
                             onArchive = { viewModel.archiveEmail(it.id) },
                             onDelete = { viewModel.deleteEmail(it.id) },
                             onMove = { moveTarget = it },
-                            onBulkAction = { category, ids, action -> viewModel.performBulkAction(category, ids, action) },
                         )
                         2 -> CleanupView(
                             emails = emails,
@@ -432,50 +439,57 @@ private fun InboxView(
     }
 }
 
+/** Bucket tabs and bulk actions. Lives above the grey panel so it never scrolls or clips the mail list. */
+@Composable
+private fun BucketControls(
+    emails: List<EmailEntity>,
+    activeCategory: String,
+    onCategorySelect: (String) -> Unit,
+    onBulkAction: (String, List<String>, String) -> Unit,
+) {
+    val ids = emails.filter { it.category == activeCategory }.map { it.id }
+    val selectedIndex = Buckets.indexOfFirst { it.first == activeCategory }.coerceAtLeast(0)
+
+    Column(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        KitSegmented(
+            count = Buckets.size,
+            selected = selectedIndex,
+            onSelect = { onCategorySelect(Buckets[it].first) },
+            tags = Buckets.map { "bucket_tab_${it.first}" },
+        ) { i, isSelected ->
+            SegmentLabel(Buckets[i].second, isSelected, emails.count { it.category == Buckets[i].first })
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            KitButton("Mark read", { onBulkAction(activeCategory, ids, "mark_as_read") },
+                Modifier.weight(1f).testTag("bulk_read_btn"), enabled = ids.isNotEmpty(), height = 36.dp)
+            KitButton("Archive", { onBulkAction(activeCategory, ids, "archive") },
+                Modifier.weight(1f).testTag("bulk_archive_btn"), enabled = ids.isNotEmpty(), height = 36.dp)
+            KitButton("Delete all", { onBulkAction(activeCategory, ids, "delete") },
+                Modifier.weight(1f).testTag("bulk_delete_btn"), danger = true, enabled = ids.isNotEmpty(), height = 36.dp)
+        }
+    }
+}
+
 @Composable
 private fun BucketsView(
     emails: List<EmailEntity>,
     activeCategory: String,
-    onCategorySelect: (String) -> Unit,
     onEmailClick: (EmailEntity) -> Unit,
     onToggleRead: (EmailEntity) -> Unit,
     onArchive: (EmailEntity) -> Unit,
     onDelete: (EmailEntity) -> Unit,
     onMove: (EmailEntity) -> Unit,
-    onBulkAction: (String, List<String>, String) -> Unit,
 ) {
     val filtered = emails.filter { it.category == activeCategory }
-    val ids = filtered.map { it.id }
-    val selectedIndex = Buckets.indexOfFirst { it.first == activeCategory }.coerceAtLeast(0)
 
-    Column(Modifier.fillMaxSize()) {
-        // Pinned above the list so scrolling emails never moves the tabs or bulk actions.
-        Column(
-            Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            KitSegmented(
-                count = Buckets.size,
-                selected = selectedIndex,
-                onSelect = { onCategorySelect(Buckets[it].first) },
-                tags = Buckets.map { "bucket_tab_${it.first}" },
-            ) { i, isSelected ->
-                SegmentLabel(Buckets[i].second, isSelected, emails.count { it.category == Buckets[i].first })
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                KitButton("Mark read", { onBulkAction(activeCategory, ids, "mark_as_read") },
-                    Modifier.weight(1f).testTag("bulk_read_btn"), enabled = ids.isNotEmpty())
-                KitButton("Archive", { onBulkAction(activeCategory, ids, "archive") },
-                    Modifier.weight(1f).testTag("bulk_archive_btn"), enabled = ids.isNotEmpty())
-                KitButton("Delete all", { onBulkAction(activeCategory, ids, "delete") },
-                    Modifier.weight(1f).testTag("bulk_delete_btn"), danger = true, enabled = ids.isNotEmpty())
-            }
-        }
-        LazyColumn(
-            Modifier.weight(1f).fillMaxWidth().testTag("buckets_lazy_column"),
-            contentPadding = ListPadding,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
+    LazyColumn(
+        Modifier.fillMaxSize().testTag("buckets_lazy_column"),
+        contentPadding = ListPadding,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         if (filtered.isEmpty()) {
             item { mutedText("Nothing in this bucket.", Modifier.padding(vertical = 24.dp, horizontal = 8.dp)) }
         }
@@ -489,7 +503,6 @@ private fun BucketsView(
                 onMove = { onMove(email) },
                 modifier = Modifier.animateItem(),
             )
-        }
         }
     }
 }

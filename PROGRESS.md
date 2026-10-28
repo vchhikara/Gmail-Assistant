@@ -40,3 +40,18 @@ Status: build steps 1 to 6 in `ARCHITECTURE.md` are implemented. `:app:assembleD
 - Google Cloud: create an OAuth client (Android, package `com.example`, debug SHA-1), enable the Gmail API, set up the consent screen with your account as a test user.
 - Run on a device: sign-in and consent flow, sync, archive and delete reaching Gmail, Nano summary on a supported phone.
 - The `Greeting` screenshot test and UI test tags were not rerun on a device.
+
+## Buckets layout fix and release check (2026-10-28)
+
+Status: Buckets tabs and the 3 bulk buttons sit above the grey panel (36dp buttons). Verified on a Samsung SM-S931B with demo data. Debug build and unit tests pass. Not committed.
+
+### Environment
+- JDK 17 installed (Microsoft OpenJDK). Set JAVA_HOME and ANDROID_HOME in each shell before gradlew.
+- The phone had an app signed with another key. It was uninstalled once. Debug builds from this PC now update in place.
+
+### Release blockers (mobile-check)
+- applicationId is com.example. Play does not accept it. Choose a real id.
+- gmail.modify is a restricted scope. Public release needs Google verification, a privacy policy URL and a security assessment.
+- backup_rules.xml and data_extraction_rules.xml are empty templates. The Room database (email subjects and snippets) can go to cloud backup. Exclude it.
+- Release build has no minification. versionCode is 1.
+- debug.keystore.base64 is tracked in git. It is a debug key. Remove it from the repo when convenient.
