@@ -55,3 +55,20 @@ Status: Buckets tabs and the 3 bulk buttons sit above the grey panel (36dp butto
 - backup_rules.xml and data_extraction_rules.xml are empty templates. The Room database (email subjects and snippets) can go to cloud backup. Exclude it.
 - Release build has no minification. versionCode is 1.
 - debug.keystore.base64 is tracked in git. It is a debug key. Remove it from the repo when convenient.
+
+## Release prep, part 1 (2026-10-28)
+
+Status: backup, R8 and keystore items done. `:app:minifyReleaseWithR8`, `:app:assembleDebug` and unit tests pass. The minified build was not run on a device (release signing needs the user's keystore).
+
+### Done
+- Backup: both rules files exclude `database` and `sharedpref` (cloud backup and device transfer).
+- R8 and resource shrinking enabled for release. Keep rules for Retrofit and `dontwarn` for OkHttp optional TLS providers in `proguard-rules.pro`. Moshi uses codegen and Room ships consumer rules, so neither needs more.
+- Unused `firebase.bom` removed. `play.services.auth` stays (Identity API in `AuthRepository`).
+- `debug.keystore.base64` untracked (already in `.gitignore`; stays in git history).
+
+### Still open
+- applicationId `com.example`: needs a new id from the user, then match the OAuth client package.
+- versionName and versionCode: set at upload time.
+- Release keystore: user runs `keytool`, then sets `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_PASSWORD`. Then run `assembleRelease` and test the minified APK on the phone.
+- Confirm the current Play target API requirement (`targetSdk` is 36).
+- README rewrite (still describes the Gemini pipeline).
