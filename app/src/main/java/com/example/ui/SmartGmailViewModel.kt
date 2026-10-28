@@ -12,7 +12,12 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import com.google.android.gms.auth.GoogleAuthUtil
+import android.content.Intent
+import android.content.IntentSender
+import com.example.auth.AuthResult
+import com.example.demo.DemoData
+import com.example.sync.SyncState
+import com.example.worker.OutboxWorker
 
 class SmartGmailViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -35,22 +40,28 @@ class SmartGmailViewModel(application: Application) : AndroidViewModel(applicati
     private val _syncResult = MutableStateFlow<String?>(null)
     val syncResult: StateFlow<String?> = _syncResult.asStateFlow()
 
-    // OAuth Session: simple simulated Google Identity Integration
-    private val _accessToken = MutableStateFlow<String?>(null)
-    val accessToken: StateFlow<String?> = _accessToken.asStateFlow()
+    private val backend = SmartGmailApp.backend
 
-    private val _userEmail = MutableStateFlow<String>(prefs.getString("oauth_email", "guest@example.com") ?: "guest@example.com")
+    private val _userEmail = MutableStateFlow(prefs.getString("oauth_email", "") ?: "")
     val userEmail: StateFlow<String> = _userEmail.asStateFlow()
 
-    private val _userName = MutableStateFlow<String>(prefs.getString("oauth_name", "Guest User") ?: "Guest User")
+    private val _userName = MutableStateFlow(prefs.getString("oauth_name", "Guest") ?: "Guest")
     val userName: StateFlow<String> = _userName.asStateFlow()
 
     private val _isConnected = MutableStateFlow(prefs.getBoolean("is_connected", false))
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
+    /** True only after the user taps "Try demo". Demo rows are labeled and never reach Gmail. */
+    private val _isDemo = MutableStateFlow(prefs.getBoolean("is_demo", false))
+    val isDemo: StateFlow<Boolean> = _isDemo.asStateFlow()
+
+    /** Set when Google needs to show its consent screen; the UI launches it and reports back. */
+    private val _pendingConsent = MutableStateFlow<IntentSender?>(null)
+    val pendingConsent: StateFlow<IntentSender?> = _pendingConsent.asStateFlow()
+
     // Navigation and UI state
     // Tabs: 0 -> Inbox, 1 -> Buckets, 2 -> Dynamic Cleanup, 3 -> Configuration Settings
-    private val _currentTab = MutableStateFlow(0)
+    private val _currentTab = MutableStateFlow(if (_isConnected.value || _isDemo.value) 0 else 3)
     val currentTab: StateFlow<Int> = _currentTab.asStateFlow()
 
     private val _activeCategoryTab = MutableStateFlow("Work")
@@ -76,15 +87,7 @@ class SmartGmailViewModel(application: Application) : AndroidViewModel(applicati
                 initialValue = emptyList()
             )
 
-        val isConnectedPref = prefs.getBoolean("is_connected", false)
-        val emailPref = prefs.getString("oauth_email", null)
-
-        if (isConnectedPref && emailPref != null) {
-            connectOAuth(_userName.value, emailPref)
-        } else {
-            // Automatically trigger sync for initial state setup
-            syncInbox()
-        }
+        if (_isConnected.value) syncInbox()
     }
 
     fun setTab(index: Int) {
@@ -102,90 +105,109 @@ class SmartGmailViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /**
-     * Integrates simulated or real OAuth 2.0 and retrieves mock access keys
-     */
-    fun connectOAuth(userName: String, email: String) {
+    /** Starts Google sign-in and the Gmail grant. Shows Google's consent screen when needed. */
+    fun connect() {
         viewModelScope.launch {
             _isLoading.value = true
-            _userName.value = userName
-            _userEmail.value = email
-            
-            prefs.edit()
-                .putString("oauth_name", userName)
-                .putString("oauth_email", email)
-                .putBoolean("is_connected", true)
-                .apply()
-            try {
-                val token = withContext(Dispatchers.IO) {
-                    GoogleAuthUtil.getToken(
-                        getApplication(),
-                        email,
-                        "oauth2:https://www.googleapis.com/auth/gmail.readonly"
-                    )
-                }
-                _accessToken.value = token
+            handleAuth(backend.auth.authorize())
+            _isLoading.value = false
+        }
+    }
+
+    fun onConsentResult(data: Intent?) {
+        _pendingConsent.value = null
+        viewModelScope.launch {
+            _isLoading.value = true
+            handleAuth(backend.auth.completeConsent(data))
+            _isLoading.value = false
+        }
+    }
+
+    private suspend fun handleAuth(result: AuthResult) {
+        when (result) {
+            is AuthResult.NeedsConsent -> _pendingConsent.value = result.intentSender
+            is AuthResult.Failure -> _syncResult.value = "Auth failed: ${result.message}"
+            is AuthResult.Success -> {
+                val name = result.name ?: result.email ?: "Google user"
+                val email = result.email ?: ""
+                _userName.value = name
+                _userEmail.value = email
                 _isConnected.value = true
-                syncInbox()
-            } catch (e: Exception) {
-                Log.e("SmartGmailViewModel", "Failed to get auth token", e)
-                _syncResult.value = "Auth failed: ${e.message}"
-                _isConnected.value = false
-                _accessToken.value = null
-            } finally {
-                _isLoading.value = false
+                _isDemo.value = false
+                prefs.edit().putString("oauth_name", name).putString("oauth_email", email)
+                    .putBoolean("is_connected", true).putBoolean("is_demo", false).apply()
+                DemoData.clear(SmartGmailApp.database)
+                runSync()
             }
         }
     }
 
     fun disconnectOAuth() {
         viewModelScope.launch {
-            _accessToken.value = null
+            backend.auth.signOut()
             _isConnected.value = false
-            _userName.value = "Guest Reader"
+            _userName.value = "Guest"
             _userEmail.value = ""
-            
-            prefs.edit()
-                .remove("oauth_name")
-                .remove("oauth_email")
-                .putBoolean("is_connected", false)
-                .apply()
-            
-            val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN).build()
-            val googleSignInClient = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(getApplication<Application>(), gso)
-            googleSignInClient.signOut()
-
+            prefs.edit().remove("oauth_name").remove("oauth_email").putBoolean("is_connected", false).apply()
             repository.clearCache()
+            SmartGmailApp.database.syncStateDao().remove(com.example.sync.SyncEngine.HISTORY_KEY)
+            _currentTab.value = 3
         }
     }
 
-    /**
-     * Syronizes local Room Database cache with the Gmail API / simulated server dataset
-     */
+    fun startDemo() {
+        viewModelScope.launch {
+            _isDemo.value = true
+            prefs.edit().putBoolean("is_demo", true).apply()
+            DemoData.load(SmartGmailApp.database, backend.classifier)
+            _syncResult.value = "Demo data loaded"
+            _currentTab.value = 0
+        }
+    }
+
+    fun exitDemo() {
+        viewModelScope.launch {
+            _isDemo.value = false
+            prefs.edit().putBoolean("is_demo", false).apply()
+            DemoData.clear(SmartGmailApp.database)
+        }
+    }
+
+    /** Pulls Gmail into the local cache. Without a Gmail connection it does nothing; demo data stays as loaded. */
     fun syncInbox() {
+        if (!_isConnected.value) {
+            _syncResult.value = "Failed: connect a Google account to sync."
+            return
+        }
         viewModelScope.launch {
             _isLoading.value = true
-            _syncResult.value = null
-            
-            val result = repository.syncInbox(
-                accessToken = _accessToken.value,
-                forceMock = !_isConnected.value // Use beautiful structured samples if no dynamic OAuth active
-            )
-            
-            if (result.isSuccess) {
-                _syncResult.value = "Successfully synchronized inbox! ${result.getOrNull()} emails loaded."
-            } else {
-                _syncResult.value = "Failed to synchronize: ${result.exceptionOrNull()?.message}"
-            }
+            runSync()
             _isLoading.value = false
         }
     }
+
+    private suspend fun runSync() {
+        _syncResult.value = null
+        _syncResult.value = when (val state = backend.syncAll()) {
+            is SyncState.Done -> "Synchronized. ${state.result.added} new emails."
+            SyncState.SignInRequired -> {
+                _isConnected.value = false
+                prefs.edit().putBoolean("is_connected", false).apply()
+                "Auth failed: sign in again to keep syncing."
+            }
+            is SyncState.Error -> "Failed to synchronize: ${state.message}"
+            else -> null
+        }
+    }
+
+    private fun queueWriteBack() = OutboxWorker.enqueue(getApplication())
 
     // --- Action Methods ---
 
     fun toggleReadStatus(emailId: String, currentRead: Boolean) {
         viewModelScope.launch {
             repository.updateReadStatus(emailId, !currentRead)
+            queueWriteBack()
             
             // Sync with selection
             if (_selectedEmail.value?.id == emailId) {
@@ -197,6 +219,7 @@ class SmartGmailViewModel(application: Application) : AndroidViewModel(applicati
     fun archiveEmail(emailId: String) {
         viewModelScope.launch {
             repository.archiveEmail(emailId)
+            queueWriteBack()
             
             // Close details if in view
             if (_selectedEmail.value?.id == emailId) {
@@ -208,6 +231,7 @@ class SmartGmailViewModel(application: Application) : AndroidViewModel(applicati
     fun deleteEmail(emailId: String) {
         viewModelScope.launch {
             repository.deleteEmail(emailId)
+            queueWriteBack()
             
             // Close details if in view
             if (_selectedEmail.value?.id == emailId) {
@@ -228,8 +252,7 @@ class SmartGmailViewModel(application: Application) : AndroidViewModel(applicati
                 "archive" -> repository.archiveEmailsForBulk(emailIds)
                 "delete" -> repository.deleteEmailsForBulk(emailIds)
             }
-            // Simple visual wait to represent Gemini operations
-            kotlinx.coroutines.delay(600)
+            queueWriteBack()
             _isLoading.value = false
         }
     }
@@ -246,15 +269,18 @@ class SmartGmailViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /**
-     * Requests on-demand Gemini thread summaries
-     */
+    /** Summarizes on demand: Gemini Nano on supported phones, rules elsewhere. Runs on the device. */
     private fun fetchEmailSummary(email: EmailEntity) {
         viewModelScope.launch {
             _isSummaryLoading.value = true
-            val updated = repository.summarizeThread(email)
-            if (updated != null && _selectedEmail.value?.id == email.id) {
-                _selectedEmail.value = updated
+            val meta = com.example.classify.EmailMeta(
+                email.sender, email.senderEmail, email.subject, email.snippet,
+                email.labelIds.split(",").filter { it.isNotEmpty() }
+            )
+            val summary = backend.summarizer.summarize(meta, email.category)
+            repository.saveSummary(email.id, summary.text, summary.actions)
+            if (_selectedEmail.value?.id == email.id) {
+                _selectedEmail.value = email.copy(summary = summary.text, suggestedActions = summary.actions.joinToString(","))
             }
             _isSummaryLoading.value = false
         }

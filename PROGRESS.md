@@ -22,3 +22,21 @@ Spec: `mockups/index.html` (approved). Kit: `~/Applications/design-kit`.
 - Run on a device and compare against the mockup in light and dark.
 - Build needs a git-ignored `.env.example` (for example `GEMINI_API_KEY=placeholder`) and `ANDROID_HOME`.
 - Not committed.
+
+## Backend rewrite (code complete 2026-10-28)
+
+Status: build steps 1 to 6 in `ARCHITECTURE.md` are implemented. `:app:assembleDebug` and all unit tests pass. Not run on a device. Not committed.
+
+### Done
+- Room v2 with a real migration, schema export, non-destructive merge, `sync_state` table.
+- `classify/` rules, `summary/` rules plus Gemini Nano (ML Kit GenAI, used only when AVAILABLE, API 26+).
+- `gmail/` Retrofit API, `sync/SyncEngine` (full and incremental via historyId), `outbox/` write-back with WorkManager retry.
+- `auth/AuthRepository` (Identity AuthorizationClient, `gmail.modify`, token never stored).
+- ViewModel and Settings rewired: Connect, Try demo / Exit demo (labeled, never a fallback), pill shows Connected, Demo data or Not connected.
+- Removed: Gemini network code, API key, secrets plugin, `GET_ACCOUNTS`, legacy GoogleSignIn.
+- Manifest uses `tools:overrideLibrary` for the genai libraries (minSdk 26 vs app 24); Nano is skipped below API 26.
+
+### Needs the user
+- Google Cloud: create an OAuth client (Android, package `com.example`, debug SHA-1), enable the Gmail API, set up the consent screen with your account as a test user.
+- Run on a device: sign-in and consent flow, sync, archive and delete reaching Gmail, Nano summary on a supported phone.
+- The `Greeting` screenshot test and UI test tags were not rerun on a device.

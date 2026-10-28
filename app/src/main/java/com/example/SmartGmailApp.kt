@@ -20,6 +20,7 @@ class SmartGmailApp : Application() {
         
         // Initialize Room DB
         database = AppDatabase.getDatabase(this)
+        backend = Backend(this, database)
         
         // Schedule background work manager sync every 30 minutes
         scheduleSyncWorker()
@@ -46,11 +47,17 @@ class SmartGmailApp : Application() {
         }
     }
 
+    fun isSignedIn(): Boolean =
+        getSharedPreferences("smart_gmail_prefs", MODE_PRIVATE).getBoolean("is_connected", false)
+
     companion object {
         lateinit var instance: SmartGmailApp
             private set
             
         lateinit var database: AppDatabase
+            private set
+
+        lateinit var backend: Backend
             private set
     }
 }

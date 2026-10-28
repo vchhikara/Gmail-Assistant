@@ -1,6 +1,9 @@
 package com.example.ui
 
 import android.app.Activity
+import android.content.Intent
+import android.content.IntentSender
+import androidx.activity.result.IntentSenderRequest
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -66,10 +69,6 @@ import com.example.ui.icons.*
 import com.example.ui.theme.KitMotion
 import com.example.ui.theme.KitShapes
 import com.example.ui.theme.kit
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.ApiException
-import com.google.android.gms.common.api.Scope
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -106,6 +105,8 @@ fun SmartGmailHome(
     val selectedEmail by viewModel.selectedEmail.collectAsState()
     val isSummaryLoading by viewModel.isSummaryLoading.collectAsState()
     val isConnected by viewModel.isConnected.collectAsState()
+    val isDemo by viewModel.isDemo.collectAsState()
+    val pendingConsent by viewModel.pendingConsent.collectAsState()
     val userName by viewModel.userName.collectAsState()
     val userEmail by viewModel.userEmail.collectAsState()
     val themePreference by viewModel.themePreference.collectAsState()
@@ -143,7 +144,7 @@ fun SmartGmailHome(
                         Hero(
                             title = "${emails.size} emails sorted",
                             body = "${plural(bills, "bill")} waiting. Cleanup found ${plural(senders, "sender")} you rarely open.",
-                            pill = if (isConnected) "Connected" else "Demo data",
+                            pill = if (isConnected) "Connected" else if (isDemo) "Demo data" else "Not connected",
                         )
                     }
                     1 -> Hero("Buckets", "Sort mail by category and clear a whole bucket in one tap.")
@@ -192,11 +193,16 @@ fun SmartGmailHome(
                         )
                         else -> SettingsView(
                             isConnected = isConnected,
+                            isDemo = isDemo,
+                            pendingConsent = pendingConsent,
+                            onConsentResult = { viewModel.onConsentResult(it) },
+                            onTryDemo = { viewModel.startDemo() },
+                            onExitDemo = { viewModel.exitDemo() },
                             userName = userName,
                             userEmail = userEmail,
                             themePreference = themePreference,
                             onThemeChange = { viewModel.setThemePreference(it) },
-                            onConnect = { name, email -> viewModel.connectOAuth(name, email) },
+                            onConnect = { viewModel.connect() },
                             onDisconnect = { viewModel.disconnectOAuth() },
                         )
                     }
@@ -442,12 +448,12 @@ private fun BucketsView(
     val ids = filtered.map { it.id }
     val selectedIndex = Buckets.indexOfFirst { it.first == activeCategory }.coerceAtLeast(0)
 
-    LazyColumn(
-        Modifier.fillMaxSize().testTag("buckets_lazy_column"),
-        contentPadding = ListPadding,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item {
+    Column(Modifier.fillMaxSize()) {
+        // Pinned above the list so scrolling emails never moves the tabs or bulk actions.
+        Column(
+            Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             KitSegmented(
                 count = Buckets.size,
                 selected = selectedIndex,
@@ -456,8 +462,6 @@ private fun BucketsView(
             ) { i, isSelected ->
                 SegmentLabel(Buckets[i].second, isSelected, emails.count { it.category == Buckets[i].first })
             }
-        }
-        item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 KitButton("Mark read", { onBulkAction(activeCategory, ids, "mark_as_read") },
                     Modifier.weight(1f).testTag("bulk_read_btn"), enabled = ids.isNotEmpty())
@@ -467,6 +471,11 @@ private fun BucketsView(
                     Modifier.weight(1f).testTag("bulk_delete_btn"), danger = true, enabled = ids.isNotEmpty())
             }
         }
+        LazyColumn(
+            Modifier.weight(1f).fillMaxWidth().testTag("buckets_lazy_column"),
+            contentPadding = ListPadding,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
         if (filtered.isEmpty()) {
             item { mutedText("Nothing in this bucket.", Modifier.padding(vertical = 24.dp, horizontal = 8.dp)) }
         }
@@ -480,6 +489,7 @@ private fun BucketsView(
                 onMove = { onMove(email) },
                 modifier = Modifier.animateItem(),
             )
+        }
         }
     }
 }
@@ -584,24 +594,23 @@ private fun CardTitle(title: String, count: Int) {
 @Composable
 private fun SettingsView(
     isConnected: Boolean,
+    isDemo: Boolean,
+    pendingConsent: IntentSender?,
+    onConsentResult: (Intent?) -> Unit,
+    onTryDemo: () -> Unit,
+    onExitDemo: () -> Unit,
     userName: String,
     userEmail: String,
     themePreference: String,
     onThemeChange: (String) -> Unit,
-    onConnect: (String, String) -> Unit,
+    onConnect: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
-    val context = LocalContext.current
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-            try {
-                val account = task.getResult(ApiException::class.java)
-                onConnect(account.displayName ?: "Unknown User", account.email ?: "")
-            } catch (e: ApiException) {
-                Log.e("SettingsView", "Google sign in failed", e)
-            }
-        }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        onConsentResult(if (result.resultCode == Activity.RESULT_OK) result.data else null)
+    }
+    LaunchedEffect(pendingConsent) {
+        pendingConsent?.let { launcher.launch(IntentSenderRequest.Builder(it).build()) }
     }
 
     LazyColumn(
@@ -636,21 +645,20 @@ private fun SettingsView(
                         Avatar(userName)
                         Column(Modifier.weight(1f)) {
                             Text("Not connected", color = kit.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                            mutedText("Link your Gmail to sort real mail. Access is read-only.", size = 12)
+                            mutedText("Sign in with Google to sort your inbox. Archive and delete update Gmail.", size = 12)
                         }
                     }
                     KitButton(
                         "Connect Google account",
-                        {
-                            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                                .requestEmail()
-                                .requestScopes(Scope("https://www.googleapis.com/auth/gmail.readonly"))
-                                .build()
-                            launcher.launch(GoogleSignIn.getClient(context, gso).signInIntent)
-                        },
+                        onConnect,
                         Modifier.fillMaxWidth().testTag("connect_oauth_btn"),
                         solid = true,
                     )
+                    if (isDemo) {
+                        KitButton("Exit demo", onExitDemo, Modifier.fillMaxWidth().testTag("exit_demo_btn"))
+                    } else {
+                        KitButton("Try demo", onTryDemo, Modifier.fillMaxWidth().testTag("try_demo_btn"))
+                    }
                 }
             }
         }
@@ -675,7 +683,7 @@ private fun SettingsView(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text("About", color = kit.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                mutedText("Gmail Assistant sorts your inbox into buckets with Gemini and suggests what to clean up. It never sends mail on your behalf.")
+                mutedText("Gmail Assistant sorts your inbox into buckets and suggests what to clean up. Everything runs on your phone. It never sends mail on your behalf.")
             }
         }
     }
