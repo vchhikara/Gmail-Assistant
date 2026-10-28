@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
@@ -10,22 +12,25 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.example"
+    applicationId = "com.gmailassistant"
     minSdk = 24
     targetSdk = 36
     versionCode = 1
-    versionName = "1.0"
+    versionName = "1.0.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      // Values come from the environment, or from a git-ignored keystore.properties in the repo root.
+      val props = Properties()
+      rootProject.file("keystore.properties").takeIf { it.exists() }?.inputStream()?.use { props.load(it) }
+      fun secret(name: String) = System.getenv(name) ?: props.getProperty(name)
+      storeFile = file(secret("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks")
+      storePassword = secret("STORE_PASSWORD")
+      keyAlias = secret("KEY_ALIAS") ?: "upload"
+      keyPassword = secret("KEY_PASSWORD") ?: secret("STORE_PASSWORD")
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")

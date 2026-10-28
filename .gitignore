@@ -18,3 +18,18 @@ local.properties
 .env
 debug.keystore
 
+
+*.jks
+*.keystore
+keystore.properties
+
+# Secrets and signing
+*.p12
+*.pfx
+*.pem
+*.key
+.env.*
+google-services.json
+service-account*.json
+client_secret*.json
+*.base64

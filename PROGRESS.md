@@ -64,7 +64,7 @@ Status: backup, R8 and keystore items done. `:app:minifyReleaseWithR8`, `:app:as
 - Backup: both rules files exclude `database` and `sharedpref` (cloud backup and device transfer).
 - R8 and resource shrinking enabled for release. Keep rules for Retrofit and `dontwarn` for OkHttp optional TLS providers in `proguard-rules.pro`. Moshi uses codegen and Room ships consumer rules, so neither needs more.
 - Unused `firebase.bom` removed. `play.services.auth` stays (Identity API in `AuthRepository`).
-- `debug.keystore.base64` untracked (already in `.gitignore`; stays in git history).
+- `debug.keystore.base64` untracked and ignored via `*.base64` (stays in git history).
 
 ### Still open
 - applicationId `com.example`: needs a new id from the user, then match the OAuth client package.
@@ -72,3 +72,26 @@ Status: backup, R8 and keystore items done. `:app:minifyReleaseWithR8`, `:app:as
 - Release keystore: user runs `keytool`, then sets `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_PASSWORD`. Then run `assembleRelease` and test the minified APK on the phone.
 - Confirm the current Play target API requirement (`targetSdk` is 36).
 - README rewrite (still describes the Gemini pipeline).
+
+## Release prep, part 2 (2026-10-28)
+
+Status: signed release APK builds (`assembleRelease`, 2.6 MB). Not yet installed or run on the phone. Not committed.
+
+### Done
+- `applicationId` is `com.gmailassistant` (package and namespace stay `com.example`). OAuth client updated in Google Cloud by the user.
+- Release signing reads env vars or git-ignored `keystore.properties`. Keystore `my-upload-key.jks` created by the user.
+- `.gitignore` covers keystores, keys, `.env*`, `keystore.properties`, `*.base64`, Google credential files.
+- README rewritten for first-time readers. Eight screenshots (light and dark) in `docs/screenshots`, taken from the Samsung phone in demo mode.
+- targetSdk 36 meets the Play requirement for August 31, 2026.
+
+### Still open
+- Register the release key SHA-1 in Google Cloud, then test Connect on the release APK.
+- No LICENSE file. Pick one.
+- Privacy policy URL and Play Console items (see HANDOFF.md).
+
+## Docs restructure (2026-10-28)
+
+- README.md rewritten for end users (opencode-remote layout). Build, signing and release steps moved to BUILD.md.
+- Added CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md and LICENSE.md (MIT, Vipul Chhikara).
+- Signed release APK sent in chat; not yet run on a phone.
+- Open: register release SHA-1 in Google Cloud and test Connect on the release APK; privacy policy URL; not committed.
