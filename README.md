@@ -9,7 +9,7 @@
   <img alt="Platform" src="https://img.shields.io/badge/Android-7.0%2B-3DDC84?logo=android&logoColor=white">
   <img alt="Kotlin and Compose" src="https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7F52FF?logo=kotlin&logoColor=white">
   <img alt="Privacy" src="https://img.shields.io/badge/data-stays%20on%20device-2ea44f">
-  <a href="LICENSE.md"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <a href="docs/LICENSE.md"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
 Most inboxes fill up with receipts, newsletters, social alerts and promotions that bury the few emails you need to read. Gmail Assistant reads your inbox, puts every email into a bucket, and lets you archive, delete or mark a whole bucket as read with one button.
@@ -67,7 +67,7 @@ What you can do:
 - The app reads sender, subject, date, labels and the short snippet. It does not download message bodies.
 - The app never sends mail on your behalf.
 
-Details are in [SECURITY.md](SECURITY.md).
+Details are in [SECURITY.md](docs/SECURITY.md).
 
 ---
 
@@ -89,7 +89,7 @@ flowchart LR
 3. Each email is classified on the device, starting with Gmail's own category labels, then mail headers and sender and subject patterns.
 4. Your actions are saved locally first, then queued and sent to Gmail with retries. Your read, archived and manual-category state survives every sync.
 
-The full design is in [ARCHITECTURE.md](ARCHITECTURE.md).
+The full design is in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
@@ -101,7 +101,7 @@ The full design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 `gmail.modify` is a restricted Google permission. Until the app passes Google's verification, only Google accounts that the maintainer has added as test users can connect. Demo mode works for everyone.
 
-Want to build it yourself? See [BUILD.md](BUILD.md).
+Want to build it yourself? See [BUILD.md](docs/BUILD.md).
 
 ---
 
@@ -116,10 +116,10 @@ Want to build it yourself? See [BUILD.md](BUILD.md).
 
 ## Contributing
 
-Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, and follow the [Code of Conduct](CODE_OF_CONDUCT.md). To report a vulnerability, see [SECURITY.md](SECURITY.md).
+Issues and pull requests are welcome. Read [CONTRIBUTING.md](docs/CONTRIBUTING.md) first, and follow the [Code of Conduct](docs/CODE_OF_CONDUCT.md). To report a vulnerability, see [SECURITY.md](docs/SECURITY.md).
 
-Current progress and open work are tracked in [PROGRESS.md](PROGRESS.md).
+Current progress and open work are tracked in [PROGRESS.md](docs/PROGRESS.md).
 
 ## License
 
-MIT. See [LICENSE.md](LICENSE.md).
+MIT. See [LICENSE.md](docs/LICENSE.md).

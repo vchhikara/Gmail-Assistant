@@ -1,6 +1,6 @@
 # Building from source
 
-This guide is for people who want to compile Gmail Assistant themselves. If you only want to use the app, see the [README](README.md).
+This guide is for people who want to compile Gmail Assistant themselves. If you only want to use the app, see the [README](../README.md).
 
 ## Requirements
 
