@@ -1,6 +1,6 @@
 # Progress
 
-## UI makeover (RQuickShare design kit)
+## UI makeover (StockAndroid design kit)
 
 Status: implemented, `:app:assembleDebug` passes. Not yet run on a device or emulator.
 
